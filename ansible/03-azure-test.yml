@@ -1,0 +1,184 @@
+---
+# 03-azure-test.yml - Deploy test VMs from custom images, verify FIPS, run STIG scan
+- name: Deploy and verify Azure VMs
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    ssh_key_file: "{{ project_dir }}/id_rsa_azure_test"
+    vm_size: "{{ azure_vm_size }}"
+    gallery_name: stig_images
+    test_vms:
+      - name: rhel9-stig-test
+        image: rhel9-stig-fips
+        rhel_version: "9"
+      - name: rhel10-stig-test
+        image: rhel10-stig-fips
+        rhel_version: "10"
+
+  module_defaults:
+    group/azure.azcollection.all:
+      auth_source: auto
+      client_id: "{{ azure_client_id }}"
+      secret: "{{ azure_password }}"
+      tenant: "{{ azure_tenant }}"
+      subscription_id: "{{ azure_subscription }}"
+
+  tasks:
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Generate SSH key for testing
+      ansible.builtin.command:
+        cmd: ssh-keygen -t rsa -b 4096 -f {{ ssh_key_file }} -N ""
+        creates: "{{ ssh_key_file }}"
+
+    - name: Create virtual network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: stig-test-vnet
+        address_prefixes: "10.0.0.0/16"
+        state: present
+
+    - name: Create subnet
+      azure.azcollection.azure_rm_subnet:
+        resource_group: "{{ azure_resourcegroup }}"
+        virtual_network: stig-test-vnet
+        name: default
+        address_prefix: "10.0.1.0/24"
+        state: present
+
+    - name: Create NSG allowing SSH
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: stig-test-nsg
+        rules:
+          - name: AllowSSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 100
+            direction: Inbound
+        state: present
+
+    - name: Create public IPs
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ item.name }}-pip"
+        allocation_method: Static
+        sku: Standard
+        state: present
+      loop: "{{ test_vms }}"
+
+    - name: Create NICs
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ item.name }}-nic"
+        virtual_network: stig-test-vnet
+        subnet: default
+        security_group: stig-test-nsg
+        ip_configurations:
+          - name: default
+            public_ip_address_name: "{{ item.name }}-pip"
+            primary: true
+        state: present
+      loop: "{{ test_vms }}"
+
+    # --- Check which VMs already exist ---
+    - name: Check existing VMs
+      azure.azcollection.azure_rm_virtualmachine_info:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ item.name }}"
+      register: vm_check
+      loop: "{{ test_vms }}"
+      ignore_errors: true
+
+    - name: Set existing VM facts
+      ansible.builtin.set_fact:
+        existing_vms: "{{ vm_check.results | selectattr('vms', 'defined') | selectattr('vms') | map(attribute='item') | map(attribute='name') | list }}"
+
+    # --- Clean up orphaned disks from previous runs ---
+    - name: Delete orphaned managed disks
+      azure.azcollection.azure_rm_manageddisk:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ item.name }}"
+        state: absent
+      loop: "{{ test_vms }}"
+      when: "item.name not in existing_vms"
+      ignore_errors: true
+
+    # --- Deploy VMs in parallel ---
+    - name: Deploy test VMs (async)
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ item.name }}"
+        vm_size: "{{ vm_size }}"
+        admin_username: "{{ azure_admin_user }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ azure_admin_user }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('file', ssh_key_file + '.pub') }}"
+        network_interfaces:
+          - "{{ item.name }}-nic"
+        image:
+          id: "/subscriptions/{{ azure_subscription }}/resourceGroups/{{ azure_resourcegroup }}/providers/Microsoft.Compute/galleries/{{ gallery_name }}/images/{{ item.image }}/versions/1.0.0"
+        os_type: Linux
+        managed_disk_type: StandardSSD_LRS
+        state: present
+      loop: "{{ test_vms }}"
+      when: "item.name not in existing_vms"
+      async: 600
+      poll: 0
+      register: vm_deploy
+
+    - name: Wait for VM deployments
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      register: vm_result
+      until: vm_result.finished
+      retries: 60
+      delay: 10
+      loop: "{{ vm_deploy.results | selectattr('ansible_job_id', 'defined') | list }}"
+
+    # --- Get IPs and wait for SSH ---
+    - name: Get public IPs
+      azure.azcollection.azure_rm_publicipaddress_info:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ item.name }}-pip"
+      register: pip_info
+      loop: "{{ test_vms }}"
+
+    - name: Set IP facts
+      ansible.builtin.set_fact:
+        vm_ips: "{{ vm_ips | default({}) | combine({item.item.name: item.publicipaddresses[0].ip_address}) }}"
+      loop: "{{ pip_info.results }}"
+
+    - name: Wait for SSH on all VMs
+      ansible.builtin.wait_for:
+        host: "{{ vm_ips[item.name] }}"
+        port: 22
+        timeout: 300
+        state: started
+      loop: "{{ test_vms }}"
+
+    - name: Allow SSH to fully initialize
+      ansible.builtin.pause:
+        seconds: 15
+
+    # --- Verify each VM ---
+    - name: Verify and scan VMs
+      ansible.builtin.include_tasks: tasks/azure-verify-vm.yml
+      loop: "{{ test_vms }}"
+      loop_control:
+        loop_var: vm
+
+    - name: Display test summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Test Complete ==="
+          - "VM size: {{ vm_size }}"
+          - "Reports saved to: {{ output_dir }}/"

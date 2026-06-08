@@ -1,0 +1,246 @@
+---
+# 00-create-build-vms.yml - Provision RHEL 9 and RHEL 10 builder VMs in parallel
+- name: Create Image Builder VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - vars.yml
+
+  environment:
+    LIBVIRT_DEFAULT_URI: "{{ lookup('env', 'LIBVIRT_DEFAULT_URI') | default('qemu:///system', true) }}"
+
+  tasks:
+    - name: Check host disk space (need ~300GB for VMs + VHDs)
+      ansible.builtin.shell: set -o pipefail && df --output=avail -BG "{{ project_dir }}" | tail -1 | tr -d ' G'
+      args:
+        executable: /bin/bash
+      register: host_avail_gb
+      changed_when: false
+
+    - name: Fail if insufficient host disk space
+      ansible.builtin.fail:
+        msg: "Insufficient host disk space: {{ host_avail_gb.stdout }}GB available, need at least 300GB (2x120GB VM disks + ~60GB VHDs + headroom)"
+      when: host_avail_gb.stdout | int < 300
+
+    - name: Verify libvirt connection
+      ansible.builtin.command: virsh uri
+      changed_when: false
+
+    - name: Create output and disk directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ output_dir }}"
+        - "{{ project_dir }}/disks"
+
+    # --- Force destroy existing VMs if force_recreate=true ---
+    - name: Destroy existing VMs (force recreate)
+      ansible.builtin.shell: |
+        virsh destroy {{ item }} 2>/dev/null || true
+        virsh undefine {{ item }} --remove-all-storage 2>/dev/null || true
+      loop:
+        - rhel9-builder
+        - rhel10-builder
+      when: force_recreate | default(false) | bool
+      changed_when: true
+
+    - name: Clean up stale disk images (force recreate)
+      ansible.builtin.file:
+        path: "{{ project_dir }}/disks/{{ item }}.qcow2"
+        state: absent
+      loop:
+        - rhel9-builder
+        - rhel10-builder
+      when: force_recreate | default(false) | bool
+
+    # --- Prep: check existence, verify ISOs, template kickstarts ---
+    - name: Check which VMs already exist
+      ansible.builtin.command: "virsh dominfo {{ item }}"
+      loop:
+        - rhel9-builder
+        - rhel10-builder
+      register: vm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Set VM existence facts
+      ansible.builtin.set_fact:
+        rhel9_exists: "{{ vm_check.results[0].rc == 0 }}"
+        rhel10_exists: "{{ vm_check.results[1].rc == 0 }}"
+
+    - name: Verify RHEL 9 ISO exists
+      ansible.builtin.stat:
+        path: "{{ rhel9_iso }}"
+      register: rhel9_iso_stat
+      when: not rhel9_exists
+
+    - name: Verify RHEL 10 ISO exists
+      ansible.builtin.stat:
+        path: "{{ rhel10_iso }}"
+      register: rhel10_iso_stat
+      when: not rhel10_exists
+
+    - name: Fail if RHEL 9 ISO not found
+      ansible.builtin.fail:
+        msg: "RHEL 9 ISO not found: {{ rhel9_iso }}"
+      when: not rhel9_exists and not (rhel9_iso_stat.stat.exists | default(false))
+
+    - name: Fail if RHEL 10 ISO not found
+      ansible.builtin.fail:
+        msg: "RHEL 10 ISO not found: {{ rhel10_iso }}"
+      when: not rhel10_exists and not (rhel10_iso_stat.stat.exists | default(false))
+
+    - name: Generate builder SSH keypair
+      ansible.builtin.command:
+        cmd: ssh-keygen -t ecdsa -b 384 -f {{ project_dir }}/builder_key -N "" -C "builder@image-builder"
+        creates: "{{ project_dir }}/builder_key"
+
+    - name: Read builder public key
+      ansible.builtin.slurp:
+        src: "{{ project_dir }}/builder_key.pub"
+      register: builder_pubkey_raw
+
+    - name: Set builder SSH pubkey fact
+      ansible.builtin.set_fact:
+        builder_ssh_pubkey: "{{ builder_pubkey_raw.content | b64decode | trim }}"
+
+    - name: Template RHEL 9 kickstart
+      ansible.builtin.template:
+        src: "{{ kickstarts_dir }}/rhel9-builder.ks.j2"
+        dest: "/tmp/rhel9-builder-ks.cfg"
+        mode: "0644"
+      when: not rhel9_exists
+
+    - name: Template RHEL 10 kickstart
+      ansible.builtin.template:
+        src: "{{ kickstarts_dir }}/rhel10-builder.ks.j2"
+        dest: "/tmp/rhel10-builder-ks.cfg"
+        mode: "0644"
+      when: not rhel10_exists
+
+    # --- Launch both virt-install in parallel using async ---
+    - name: Install RHEL 9 builder VM (async)
+      ansible.builtin.command: >-
+        virt-install
+        --name rhel9-builder
+        --memory {{ build_vm_ram_mb }}
+        --vcpus {{ build_vm_vcpus }}
+        --os-variant rhel9-unknown
+        --disk path={{ project_dir }}/disks/rhel9-builder.qcow2,size={{ build_vm_disk_gb }},format=qcow2,bus=virtio
+        --network network={{ libvirt_network }},model=virtio
+        --location {{ rhel9_iso }}
+        --initrd-inject=/tmp/rhel9-builder-ks.cfg
+        --extra-args "inst.ks=file:/rhel9-builder-ks.cfg fips=1 console=ttyS0,115200n8 inst.text"
+        --graphics none
+        --console pty,target_type=serial
+        --noautoconsole
+        --wait -1
+      async: 3600
+      poll: 0
+      register: rhel9_install
+      changed_when: true
+      when: not rhel9_exists
+
+    - name: Install RHEL 10 builder VM (async)
+      ansible.builtin.command: >-
+        virt-install
+        --name rhel10-builder
+        --memory {{ build_vm_ram_mb }}
+        --vcpus {{ build_vm_vcpus }}
+        --os-variant rhel9-unknown
+        --disk path={{ project_dir }}/disks/rhel10-builder.qcow2,size={{ build_vm_disk_gb }},format=qcow2,bus=virtio
+        --network network={{ libvirt_network }},model=virtio
+        --location {{ rhel10_iso }}
+        --initrd-inject=/tmp/rhel10-builder-ks.cfg
+        --extra-args "inst.ks=file:/rhel10-builder-ks.cfg fips=1 console=ttyS0,115200n8"
+        --graphics none
+        --console pty,target_type=serial
+        --noautoconsole
+        --wait -1
+      async: 3600
+      poll: 0
+      register: rhel10_install
+      changed_when: true
+      when: not rhel10_exists
+
+    # --- Wait for both installations to finish ---
+    - name: Wait for RHEL 9 installation to complete
+      ansible.builtin.async_status:
+        jid: "{{ rhel9_install.ansible_job_id }}"
+      register: rhel9_result
+      until: rhel9_result.finished
+      retries: 120
+      delay: 30
+      when: not rhel9_exists
+
+    - name: Wait for RHEL 10 installation to complete
+      ansible.builtin.async_status:
+        jid: "{{ rhel10_install.ansible_job_id }}"
+      register: rhel10_result
+      until: rhel10_result.finished
+      retries: 120
+      delay: 30
+      when: not rhel10_exists
+
+    # --- Start VMs (they poweroff after install) and get IPs ---
+    - name: Start builder VMs
+      ansible.builtin.command: "virsh start {{ item }}"
+      loop:
+        - rhel9-builder
+        - rhel10-builder
+      register: start_vms
+      failed_when: start_vms.rc != 0 and 'already active' not in start_vms.stderr
+      changed_when: "'Domain' in start_vms.stdout"
+
+    - name: Wait for RHEL 9 builder IP
+      ansible.builtin.shell: set -o pipefail && virsh domifaddr rhel9-builder 2>/dev/null | grep -oP '(\d+\.){3}\d+'
+      args:
+        executable: /bin/bash
+      register: rhel9_ip_result
+      until: rhel9_ip_result.stdout | trim | length > 0
+      retries: 30
+      delay: 10
+      changed_when: false
+      failed_when: false
+
+    - name: Wait for RHEL 10 builder IP
+      ansible.builtin.shell: set -o pipefail && virsh domifaddr rhel10-builder 2>/dev/null | grep -oP '(\d+\.){3}\d+'
+      args:
+        executable: /bin/bash
+      register: rhel10_ip_result
+      until: rhel10_ip_result.stdout | trim | length > 0
+      retries: 30
+      delay: 10
+      changed_when: false
+      failed_when: false
+
+    - name: Wait for SSH on builder VMs
+      ansible.builtin.wait_for:
+        host: "{{ item }}"
+        port: 22
+        timeout: 120
+      loop:
+        - "{{ rhel9_ip_result.stdout | trim }}"
+        - "{{ rhel10_ip_result.stdout | trim }}"
+
+    - name: Save builder IPs for subsequent playbooks
+      ansible.builtin.copy:
+        content: |
+          rhel9_builder_ip: "{{ rhel9_ip_result.stdout | trim }}"
+          rhel10_builder_ip: "{{ rhel10_ip_result.stdout | trim }}"
+          builder_ssh_key: "{{ project_dir }}/builder_key"
+        dest: "{{ project_dir }}/ansible/.builder_ips.yml"
+        mode: "0644"
+
+    - name: Display VM information
+      ansible.builtin.debug:
+        msg: |-
+          Builder VMs ready (FIPS+STIG enabled).
+            RHEL 9  : {{ rhel9_ip_result.stdout | default('pending') | trim }}
+            RHEL 10 : {{ rhel10_ip_result.stdout | default('pending') | trim }}
+
+          Next: ./run.sh 01-build-images.yml

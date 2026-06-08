@@ -1,0 +1,225 @@
+---
+# 02-azure-upload.yml - Upload VHD images to Azure and create gallery image resources
+- name: Upload VHDs to Azure and create images
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  vars:
+    gallery_name: stig_images
+    images:
+      - name: rhel9-stig-fips
+        vhd: rhel9-azure-stig-fips.vhd
+        offer: RHEL
+        sku: "9-stig-fips"
+      - name: rhel10-stig-fips
+        vhd: rhel10-azure-stig-fips.vhd
+        offer: RHEL
+        sku: "10-stig-fips"
+
+  module_defaults:
+    group/azure.azcollection.all:
+      auth_source: auto
+      client_id: "{{ azure_client_id }}"
+      secret: "{{ azure_password }}"
+      tenant: "{{ azure_tenant }}"
+      subscription_id: "{{ azure_subscription }}"
+
+  environment:
+    AZURE_CLIENT_ID: "{{ azure_client_id }}"
+    AZURE_CLIENT_SECRET: "{{ azure_password }}"
+    AZURE_TENANT_ID: "{{ azure_tenant }}"
+    AZURE_SUBSCRIPTION_ID: "{{ azure_subscription }}"
+
+  tasks:
+    - name: Create storage account
+      azure.azcollection.azure_rm_storageaccount:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ azure_storage_account }}"
+        location: "{{ azure_location }}"
+        account_type: Standard_LRS
+        kind: StorageV2
+        state: present
+
+    - name: Create blob container
+      azure.azcollection.azure_rm_storageblob:
+        resource_group: "{{ azure_resourcegroup }}"
+        storage_account_name: "{{ azure_storage_account }}"
+        container: "{{ azure_storage_container }}"
+        state: present
+
+    - name: Get storage account keys
+      azure.azcollection.azure_rm_storageaccount_info:
+        resource_group: "{{ azure_resourcegroup }}"
+        name: "{{ azure_storage_account }}"
+        show_connection_string: true
+      register: sa_info
+
+    - name: Set storage key
+      ansible.builtin.set_fact:
+        sa_key: "{{ sa_info.storageaccounts[0].primary_endpoints.key }}"
+
+    - name: Generate container SAS token
+      ansible.builtin.shell:
+        cmd: |
+          python3 -c "
+          from datetime import datetime, timedelta, timezone
+          from azure.storage.blob import generate_container_sas, ContainerSasPermissions
+          sas = generate_container_sas(
+              account_name='{{ azure_storage_account }}',
+              container_name='{{ azure_storage_container }}',
+              account_key='{{ sa_key }}',
+              permission=ContainerSasPermissions(read=True, write=True, create=True),
+              expiry=datetime.now(timezone.utc) + timedelta(hours=4),
+          )
+          print(sas)
+          "
+      register: sas_token
+      changed_when: false
+
+    # Parallel async uploads via azcopy
+    - name: Upload RHEL 9 VHD (async)
+      ansible.builtin.shell:
+        cmd: >-
+          azcopy copy
+          "{{ output_dir }}/rhel9-azure-stig-fips.vhd"
+          "https://{{ azure_storage_account }}.blob.core.windows.net/{{ azure_storage_container }}/rhel9-azure-stig-fips.vhd?{{ sas_token.stdout | trim }}"
+          --blob-type PageBlob --overwrite true
+      async: 7200
+      poll: 0
+      register: rhel9_upload
+
+    - name: Upload RHEL 10 VHD (async)
+      ansible.builtin.shell:
+        cmd: >-
+          azcopy copy
+          "{{ output_dir }}/rhel10-azure-stig-fips.vhd"
+          "https://{{ azure_storage_account }}.blob.core.windows.net/{{ azure_storage_container }}/rhel10-azure-stig-fips.vhd?{{ sas_token.stdout | trim }}"
+          --blob-type PageBlob --overwrite true
+      async: 7200
+      poll: 0
+      register: rhel10_upload
+
+    - name: Wait for RHEL 9 upload
+      ansible.builtin.async_status:
+        jid: "{{ rhel9_upload.ansible_job_id }}"
+      register: rhel9_result
+      until: rhel9_result.finished
+      retries: 240
+      delay: 30
+
+    - name: Wait for RHEL 10 upload
+      ansible.builtin.async_status:
+        jid: "{{ rhel10_upload.ansible_job_id }}"
+      register: rhel10_result
+      until: rhel10_result.finished
+      retries: 240
+      delay: 30
+
+    - name: Login to Azure CLI
+      ansible.builtin.command:
+        cmd: >-
+          az login --service-principal
+          -u "{{ azure_client_id }}"
+          -p "{{ azure_password }}"
+          --tenant "{{ azure_tenant }}"
+      changed_when: true
+
+    - name: Set Azure CLI subscription
+      ansible.builtin.command:
+        cmd: az account set --subscription "{{ azure_subscription }}"
+      changed_when: true
+
+    # --- Azure Compute Gallery with NVMe support (using ARM API) ---
+    - name: Create Azure Compute Gallery
+      azure.azcollection.azure_rm_resource:
+        resource_group: "{{ azure_resourcegroup }}"
+        provider: Compute
+        resource_type: galleries
+        resource_name: "{{ gallery_name }}"
+        api_version: "2022-03-03"
+        body:
+          location: "{{ azure_location }}"
+          properties: {}
+        state: present
+
+    - name: Create image definitions with NVMe+SCSI support
+      azure.azcollection.azure_rm_resource:
+        resource_group: "{{ azure_resourcegroup }}"
+        provider: Compute
+        resource_type: galleries
+        resource_name: "{{ gallery_name }}"
+        subresource:
+          - type: images
+            name: "{{ item.name }}"
+        api_version: "2022-03-03"
+        body:
+          location: "{{ azure_location }}"
+          properties:
+            osType: Linux
+            osState: Generalized
+            hyperVGeneration: V2
+            identifier:
+              publisher: RedHat
+              offer: "{{ item.offer }}"
+              sku: "{{ item.sku }}"
+            features:
+              - name: DiskControllerTypes
+                value: "SCSI, NVMe"
+        state: present
+      loop: "{{ images }}"
+
+    - name: Delete existing image versions (force refresh)
+      azure.azcollection.azure_rm_resource:
+        resource_group: "{{ azure_resourcegroup }}"
+        provider: Compute
+        resource_type: galleries
+        resource_name: "{{ gallery_name }}"
+        subresource:
+          - type: images
+            name: "{{ item.name }}"
+          - type: versions
+            name: "1.0.0"
+        api_version: "2022-03-03"
+        state: absent
+      loop: "{{ images }}"
+      ignore_errors: true
+
+    - name: Wait for image version deletions to propagate
+      ansible.builtin.pause:
+        seconds: 60
+
+    - name: Create image versions from VHD blobs
+      azure.azcollection.azure_rm_resource:
+        resource_group: "{{ azure_resourcegroup }}"
+        provider: Compute
+        resource_type: galleries
+        resource_name: "{{ gallery_name }}"
+        subresource:
+          - type: images
+            name: "{{ item.name }}"
+          - type: versions
+            name: "1.0.0"
+        api_version: "2022-03-03"
+        body:
+          location: "{{ azure_location }}"
+          properties:
+            storageProfile:
+              osDiskImage:
+                source:
+                  uri: "https://{{ azure_storage_account }}.blob.core.windows.net/{{ azure_storage_container }}/{{ item.vhd }}"
+                  storageAccountId: "/subscriptions/{{ azure_subscription }}/resourceGroups/{{ azure_resourcegroup }}/providers/Microsoft.Storage/storageAccounts/{{ azure_storage_account }}"
+        state: present
+      loop: "{{ images }}"
+      register: create_result
+      until: create_result is not failed
+      retries: 6
+      delay: 30
+
+    - name: Display results
+      ansible.builtin.debug:
+        msg:
+          - "Gallery: {{ gallery_name }}"
+          - "RHEL 9 image: {{ gallery_name }}/rhel9-stig-fips/1.0.0"
+          - "RHEL 10 image: {{ gallery_name }}/rhel10-stig-fips/1.0.0"
+          - "Next: ./run.sh 03-azure-test.yml"

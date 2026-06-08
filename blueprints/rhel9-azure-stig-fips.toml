@@ -1,0 +1,172 @@
+name = "rhel9-azure-stig-fips"
+description = "RHEL 9 Azure VHD with DISA STIG, FIPS 140-2, LVM partitioning (BYOS/Gen2)"
+version = "1.2.0"
+distro = "rhel-9"
+
+# STIG + Azure packages
+[[packages]]
+name = "aide"
+[[packages]]
+name = "audit"
+[[packages]]
+name = "audispd-plugins"
+[[packages]]
+name = "chrony"
+[[packages]]
+name = "cronie"
+[[packages]]
+name = "crypto-policies"
+[[packages]]
+name = "dracut-fips"
+[[packages]]
+name = "fapolicyd"
+[[packages]]
+name = "firewalld"
+[[packages]]
+name = "kernel-modules-extra"
+[[packages]]
+name = "gnutls-utils"
+[[packages]]
+name = "libreswan"
+[[packages]]
+name = "nss-tools"
+[[packages]]
+name = "opensc"
+[[packages]]
+name = "openscap-scanner"
+[[packages]]
+name = "openssh-clients"
+[[packages]]
+name = "openssh-server"
+[[packages]]
+name = "openssl-pkcs11"
+[[packages]]
+name = "pcsc-lite"
+[[packages]]
+name = "policycoreutils"
+[[packages]]
+name = "policycoreutils-python-utils"
+[[packages]]
+name = "postfix"
+[[packages]]
+name = "rng-tools"
+[[packages]]
+name = "rsyslog"
+[[packages]]
+name = "rsyslog-gnutls"
+[[packages]]
+name = "s-nail"
+[[packages]]
+name = "scap-security-guide"
+[[packages]]
+name = "sssd"
+[[packages]]
+name = "sssd-tools"
+[[packages]]
+name = "subscription-manager"
+[[packages]]
+name = "sudo"
+[[packages]]
+name = "usbguard"
+
+[customizations]
+fips = true
+partitioning_mode = "lvm"
+
+[customizations.openscap]
+datastream = "/usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml"
+profile_id = "xccdf_org.ssgproject.content_profile_stig"
+
+[customizations.kernel]
+append = "audit_backlog_limit=8192 audit=1 page_poison=1 vsyscall=none pti=on init_on_free=1"
+
+[customizations.timezone]
+timezone = "UTC"
+
+[customizations.locale]
+languages = ["C.UTF-8"]
+
+[customizations.services]
+enabled = ["auditd", "usbguard", "sshd", "chronyd", "fapolicyd", "firewalld", "systemd-journald", "rsyslog", "pcscd", "sssd"]
+masked = ["kdump", "autofs", "debug-shell"]
+
+[customizations.firewall.services]
+enabled = ["ssh"]
+
+# Fix: logind_session_timeout - set idle session timeout (30 min)
+[[customizations.files]]
+path = "/etc/systemd/logind.conf"
+data = "[Login]\nStopIdleSessionSec=1800\n"
+
+# Fix: sysctl_user_max_user_namespaces - disable user namespaces
+[[customizations.files]]
+path = "/etc/sysctl.d/99-stig-namespaces.conf"
+data = "user.max_user_namespaces = 0\n"
+
+# Fix: harden_sshd_macs - restrict SSH MACs to FIPS-approved only
+[[customizations.files]]
+path = "/etc/crypto-policies/back-ends/openssh.config"
+data = "Ciphers aes256-gcm@openssh.com,aes256-ctr,aes128-gcm@openssh.com,aes128-ctr\nMACs hmac-sha2-512,hmac-sha2-256\nGSSAPIKexAlgorithms gss-curve25519-sha256-\nKexAlgorithms ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512\nHostKeyAlgorithms ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,ssh-rsa,rsa-sha2-512,rsa-sha2-256\nPubkeyAcceptedAlgorithms ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,ssh-rsa,rsa-sha2-512,rsa-sha2-256\nCASignatureAlgorithms ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,ssh-rsa,rsa-sha2-512,rsa-sha2-256\n"
+
+# Fix: harden_sshd_macs for server policy
+[[customizations.files]]
+path = "/etc/crypto-policies/back-ends/opensshserver.config"
+data = "Ciphers aes256-gcm@openssh.com,aes256-ctr,aes128-gcm@openssh.com,aes128-ctr\nMACs hmac-sha2-512,hmac-sha2-256\nGSSAPIKexAlgorithms gss-curve25519-sha256-\nKexAlgorithms ecdh-sha2-nistp384,ecdh-sha2-nistp256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512\nHostKeyAlgorithms ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,ssh-rsa,rsa-sha2-512,rsa-sha2-256\nPubkeyAcceptedAlgorithms ecdsa-sha2-nistp384,ecdsa-sha2-nistp256,ssh-rsa,rsa-sha2-512,rsa-sha2-256\n"
+
+# Fix: file_permission_user_init_files_root - secure root's init files
+[[customizations.files]]
+path = "/root/.bash_profile"
+mode = "0600"
+data = "# .bash_profile\n[ -f ~/.bashrc ] && . ~/.bashrc\n"
+
+[[customizations.files]]
+path = "/root/.bashrc"
+mode = "0600"
+data = "# .bashrc\nalias rm='rm -i'\nalias cp='cp -i'\nalias mv='mv -i'\n"
+
+# Fix: sssd_enable_certmap - configure SSSD certificate mapping
+[[customizations.files]]
+path = "/etc/sssd/sssd.conf"
+mode = "0600"
+data = "[sssd]\ndomains = local\nservices = nss, pam\n\n[domain/local]\nid_provider = files\n\n[certmap/local/default]\nmatchrule = <KU>digitalSignature\nmaprule = (userCertificate;binary={cert!bin})\n"
+
+# Fix: selinux_context_elevation_for_sudo - require SELinux type transition
+[[customizations.files]]
+path = "/etc/sudoers.d/99-stig-selinux"
+mode = "0440"
+data = "Defaults syslog=auth\nDefaults env_reset\nDefaults use_pty\n"
+
+# Parent dir required before drop-in file (osbuild copy does not mkdir -p)
+[[customizations.directories]]
+path = "/etc/systemd/system/fapolicyd.service.d"
+ensure_parents = true
+
+# Fix: fapolicyd trustdb race condition (RHEL known issue)
+# https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/9.6_release_notes/known-issues
+# "Missing files in trustdb cause denials for fapolicyd" - STIG remediation during
+# build causes trustdb/rpmdb desync; on first boot fapolicyd blocks libc.so.6.
+[[customizations.files]]
+path = "/etc/systemd/system/fapolicyd.service.d/10-update-trustdb.conf"
+data = "[Service]\nExecStartPre=/usr/sbin/fapolicyd-cli --update\n"
+
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "10 GiB"
+[[customizations.filesystem]]
+mountpoint = "/home"
+minsize = "1 GiB"
+[[customizations.filesystem]]
+mountpoint = "/tmp"
+minsize = "1 GiB"
+[[customizations.filesystem]]
+mountpoint = "/var"
+minsize = "3 GiB"
+[[customizations.filesystem]]
+mountpoint = "/var/log"
+minsize = "1 GiB"
+[[customizations.filesystem]]
+mountpoint = "/var/log/audit"
+minsize = "10 GiB"
+[[customizations.filesystem]]
+mountpoint = "/var/tmp"
+minsize = "1 GiB"

@@ -1,0 +1,23 @@
+---
+# site.yml - Full end-to-end: build VMs, create images, upload to Azure, test
+#
+# Usage:
+#   ansible-playbook site.yml
+#
+# Or run individual phases:
+#   ansible-playbook 00-create-build-vms.yml
+#   ansible-playbook 01-build-images.yml -e "rhel9_builder_ip=x.x.x.x rhel10_builder_ip=y.y.y.y"
+#   ansible-playbook 02-azure-upload.yml
+#   ansible-playbook 03-azure-test.yml
+
+- name: "Phase 0: Create builder VMs"
+  ansible.builtin.import_playbook: 00-create-build-vms.yml
+
+- name: "Phase 1: Build VHD images"
+  ansible.builtin.import_playbook: 01-build-images.yml
+
+- name: "Phase 2: Upload to Azure"
+  ansible.builtin.import_playbook: 02-azure-upload.yml
+
+- name: "Phase 3: Deploy and verify"
+  ansible.builtin.import_playbook: 03-azure-test.yml

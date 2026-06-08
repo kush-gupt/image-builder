@@ -1,0 +1,50 @@
+---
+name: Lint
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ansible/community-ansible-dev-tools:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Galaxy collections
+        run: ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Run ansible-lint
+        run: ansible-lint
+        working-directory: ansible
+
+  yamllint:
+    name: YAML Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint .
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: ansible
+          severity: warning

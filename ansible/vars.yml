@@ -1,0 +1,39 @@
+---
+# All values can be overridden via environment variables or --extra-vars
+
+# --- RHEL ISOs ---
+rhel9_iso: "{{ lookup('env', 'RHEL9_ISO') | default('/path/to/rhel-9.x-x86_64-dvd.iso', true) }}"
+rhel10_iso: "{{ lookup('env', 'RHEL10_ISO') | default('/path/to/rhel-10.x-x86_64-boot.iso', true) }}"
+
+# --- Red Hat Subscription ---
+rh_org_id: "{{ lookup('env', 'RH_ORG_ID') | default('', true) }}"
+rh_activation_key: "{{ lookup('env', 'RH_ACTIVATION_KEY') | default('', true) }}"
+
+# --- Azure credentials ---
+azure_client_id: "{{ lookup('env', 'AZURE_CLIENT_ID') }}"
+azure_password: "{{ lookup('env', 'AZURE_PASSWORD') }}"
+azure_tenant: "{{ lookup('env', 'AZURE_TENANT') }}"
+azure_subscription: "{{ lookup('env', 'AZURE_SUBSCRIPTION') }}"
+azure_resourcegroup: "{{ lookup('env', 'AZURE_RESOURCEGROUP') }}"
+azure_location: "{{ lookup('env', 'AZURE_LOCATION') | default('eastus', true) }}"
+azure_storage_account: "{{ lookup('env', 'AZURE_STORAGE_ACCOUNT') | default('stigimages' + azure_resourcegroup | regex_replace('[^a-z0-9]', '') | truncate(16, True, ''), true) }}"
+azure_storage_container: "{{ lookup('env', 'AZURE_STORAGE_CONTAINER') | default('vhds', true) }}"
+
+# --- Builder VM credentials ---
+builder_password: "{{ lookup('env', 'BUILDER_PASSWORD') }}"
+
+# --- Build VM configuration ---
+build_vm_ram_mb: "{{ lookup('env', 'BUILD_VM_RAM') | default('4096', true) | int }}"
+build_vm_vcpus: "{{ lookup('env', 'BUILD_VM_VCPUS') | default('2', true) | int }}"
+build_vm_disk_gb: "{{ lookup('env', 'BUILD_VM_DISK') | default('120', true) | int }}"
+libvirt_network: "{{ lookup('env', 'LIBVIRT_NETWORK') | default('default', true) }}"
+
+# --- Azure VM test configuration ---
+azure_vm_size: "{{ lookup('env', 'AZURE_VM_SIZE') | default('Standard_D2s_v6', true) }}"
+azure_admin_user: "{{ lookup('env', 'AZURE_ADMIN_USER') | default('azureuser', true) }}"
+
+# --- Paths ---
+project_dir: "{{ playbook_dir }}/.."
+blueprints_dir: "{{ project_dir }}/blueprints"
+kickstarts_dir: "{{ project_dir }}/kickstarts"
+output_dir: "{{ project_dir }}/output"

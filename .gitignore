@@ -1,0 +1,34 @@
+# Secrets
+.env
+ansible/.builder_ips.yml
+
+# Build artifacts
+output/
+disks/
+*.vhd
+*.qcow2
+*.img
+*.iso
+
+# Large archives
+*.tar.gz
+*.tar.xz
+*.zip
+
+# Temporary files
+*.log
+*.pid
+*.retry
+/tmp/
+
+# SSH keys (generated at runtime — never commit)
+builder_key*
+id_rsa_azure_test*
+
+# Editor / IDE state
+.cursor/
+.vscode/
+
+# OS-specific
+.DS_Store
+Thumbs.db

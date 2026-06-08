@@ -1,0 +1,19 @@
+---
+profile: production
+
+exclude_paths:
+  - output/
+  - disks/
+  - .github/
+
+skip_list:
+  # Shell/command tasks that perform builds and provisioning are inherently
+  # side-effectful; changed_when is set where meaningful.
+  - no-changed-when
+  # The pipeline needs free-form shell for piped commands and complex args.
+  - command-instead-of-shell
+  # Jinja2 spacing in vars.yml follows Ansible common practice.
+  - jinja[spacing]
+
+warn_list:
+  - yaml[line-length]

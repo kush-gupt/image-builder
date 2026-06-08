@@ -1,0 +1,100 @@
+---
+# tasks/azure-verify-vm.yml - Verify FIPS, LVM, and STIG on a deployed Azure VM
+# Required vars: vm (dict with name, rhel_version), vm_ips, ssh_key_file
+
+- name: "Verify FIPS mode on {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
+      cat /proc/sys/crypto/fips_enabled
+  register: fips_check
+  changed_when: false
+
+- name: "FIPS result for {{ vm.name }}"
+  ansible.builtin.debug:
+    msg: "{{ 'PASS: FIPS enabled' if fips_check.stdout | trim == '1' else 'FAIL: FIPS NOT enabled' }}"
+
+- name: "Verify LVM layout on {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
+      bash -c 'echo "=== LVM ===" && sudo lvs --noheadings 2>/dev/null && echo "=== Mounts ===" && df -hT / /home /tmp /var /var/log /var/log/audit /var/tmp 2>/dev/null'
+  register: lvm_check
+  changed_when: false
+
+- name: "LVM/mount output for {{ vm.name }}"
+  ansible.builtin.debug:
+    msg: "{{ lvm_check.stdout_lines }}"
+
+- name: "Verify kernel cmdline on {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
+      cat /proc/cmdline
+  register: cmdline_check
+  changed_when: false
+
+- name: "Kernel cmdline for {{ vm.name }}"
+  ansible.builtin.debug:
+    msg: "{{ cmdline_check.stdout }}"
+
+- name: "Run OpenSCAP STIG scan on {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
+      sudo oscap xccdf eval
+      --profile xccdf_org.ssgproject.content_profile_stig
+      --results /tmp/stig-results.xml
+      --report /tmp/stig-report.html
+      /usr/share/xml/scap/ssg/content/ssg-rhel{{ vm.rhel_version }}-ds.xml
+  register: oscap_result
+  failed_when: false
+  changed_when: false
+
+- name: "Get STIG score for {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
+      bash -c 'pass=$(sudo grep -c "<result>pass</result>" /tmp/stig-results.xml 2>/dev/null || echo 0);
+      fail=$(sudo grep -c "<result>fail</result>" /tmp/stig-results.xml 2>/dev/null || echo 0);
+      total=$((pass + fail));
+      if [ $total -gt 0 ]; then echo "Pass: $pass, Fail: $fail, Compliance: $((pass * 100 / total))%";
+      else echo "Pass: $pass, Fail: $fail, No results"; fi'
+  register: stig_score
+  changed_when: false
+
+- name: "STIG compliance for {{ vm.name }}"
+  ansible.builtin.debug:
+    msg: "{{ stig_score.stdout }}"
+
+- name: "Make STIG reports readable on {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
+      sudo chmod 644 /tmp/stig-report.html /tmp/stig-results.xml
+  failed_when: false
+  changed_when: false
+
+- name: "Download STIG report from {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}:/tmp/stig-report.html
+      {{ output_dir }}/{{ vm.name }}-stig-report.html
+  failed_when: false
+  changed_when: false
+
+- name: "Download STIG results XML from {{ vm.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
+      {{ azure_admin_user }}@{{ vm_ips[vm.name] }}:/tmp/stig-results.xml
+      {{ output_dir }}/{{ vm.name }}-stig-results.xml
+  failed_when: false
+  changed_when: false

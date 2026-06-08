@@ -1,0 +1,20 @@
+FROM ghcr.io/ansible/community-ansible-dev-tools:latest
+
+USER root
+
+RUN rpm --import https://packages.microsoft.com/keys/microsoft.asc \
+    && dnf install -y https://packages.microsoft.com/config/fedora/42/packages-microsoft-prod.rpm \
+    && dnf install -y \
+        azure-cli \
+        libvirt-client \
+        virt-install \
+        acl \
+    && dnf clean all \
+    && curl -sL 'https://aka.ms/downloadazcopy-v10-linux' | tar xz --strip-components=1 -C /usr/local/bin/ --wildcards '*/azcopy'
+
+COPY requirements.yml /tmp/requirements.yml
+RUN ansible-galaxy collection install -r /tmp/requirements.yml \
+    && pip install --no-cache-dir -r /root/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt \
+    && rm /tmp/requirements.yml
+
+WORKDIR /workdir/ansible

@@ -4,7 +4,7 @@ locals {
   storage_account_name = (
     var.storage_account_name != ""
     ? var.storage_account_name
-    : substr("stigimages${replace(lower(var.resource_group_name), "/[^a-z0-9]/", "")}", 0, 24)
+    : substr("stigimages${regexreplace(lower(var.resource_group_name), "[^a-z0-9]", "")}", 0, 24)
   )
 
   images = {

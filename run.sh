@@ -172,12 +172,17 @@ if [ "$MODE" = "ansible" ]; then
         -w "${PROJECT_DIR}/ansible"
     )
 
+    declare -A _mounted_dirs
     for iso_var in RHEL9_ISO RHEL10_ISO; do
         iso_path="${!iso_var:-}"
         if [ -n "$iso_path" ] && [ -f "$iso_path" ]; then
             _set_traversal_acls "$iso_path"
             _set_qemu_acl r "$iso_path"
-            PODMAN_ARGS+=(-v "$(dirname "$iso_path"):$(dirname "$iso_path"):ro")
+            iso_dir="$(dirname "$iso_path")"
+            if [ -z "${_mounted_dirs[$iso_dir]:-}" ]; then
+                PODMAN_ARGS+=(-v "${iso_dir}:${iso_dir}:ro")
+                _mounted_dirs[$iso_dir]=1
+            fi
         fi
     done
 
@@ -194,10 +199,10 @@ if [ "$MODE" = "terraform" ]; then
     _env ARM_TENANT_ID    "${AZURE_TENANT:-}"
     _env ARM_SUBSCRIPTION_ID "${AZURE_SUBSCRIPTION:-}"
     _env HOME /tmp
-    for var in TF_VAR_resource_group_name TF_VAR_storage_account_name TF_VAR_location \
-               TF_VAR_subscription_id; do
-        [ -n "${!var:-}" ] && _env "$var" "${!var}"
-    done
+    _env TF_VAR_subscription_id      "${TF_VAR_subscription_id:-${AZURE_SUBSCRIPTION:-}}"
+    _env TF_VAR_resource_group_name  "${TF_VAR_resource_group_name:-${AZURE_RESOURCEGROUP:-}}"
+    _env TF_VAR_location             "${TF_VAR_location:-${AZURE_LOCATION:-eastus}}"
+    _env TF_VAR_storage_account_name "${TF_VAR_storage_account_name:-${AZURE_STORAGE_ACCOUNT:-}}"
 
     # --userns=keep-id maps the real user into the container at their
     # own UID (non-root).  This naturally yields zero capabilities in

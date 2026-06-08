@@ -1,8 +1,9 @@
 # --- Azure identity (provider uses ARM_CLIENT_ID / ARM_CLIENT_SECRET / ARM_TENANT_ID env vars) ---
 
 variable "subscription_id" {
-  description = "Azure subscription ID. Also settable via ARM_SUBSCRIPTION_ID."
+  description = "Azure subscription ID. Falls back to ARM_SUBSCRIPTION_ID env var if unset."
   type        = string
+  default     = null
 }
 
 # --- Resource group (must already exist) ---

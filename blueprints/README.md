@@ -6,7 +6,7 @@ Red Hat Image Builder blueprint files (TOML). Each one defines a full OS image: 
 | Blueprint                    | Builder tool                      | FIPS standard | STIG datastream     |
 | ---------------------------- | --------------------------------- | ------------- | ------------------- |
 | `rhel9-azure-stig-fips.toml` | `composer-cli` (osbuild-composer) | 140-3         | `ssg-rhel9-ds.xml`  |
-| `rhel10-stig-fips.toml`      | `image-builder` CLI               | 140-3         | `ssg-rhel10-ds.xml` |
+| `rhel10-azure-stig-fips.toml` | `image-builder` CLI              | 140-3         | `ssg-rhel10-ds.xml` |
 
 
 ## Packages

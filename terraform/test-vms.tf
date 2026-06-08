@@ -67,7 +67,7 @@ resource "azurerm_linux_virtual_machine" "test" {
 
   admin_ssh_key {
     username   = var.admin_username
-    public_key = tls_private_key.test[0].public_key_openssh
+    public_key = one(tls_private_key.test[*].public_key_openssh)
   }
 
   source_image_id = azapi_resource.image_versions[each.value.image_key].id
@@ -95,7 +95,7 @@ resource "null_resource" "verify_vm" {
     environment = {
       VM_NAME      = each.key
       VM_IP        = azurerm_public_ip.test[each.key].ip_address
-      SSH_KEY      = local_sensitive_file.ssh_private_key[0].filename
+      SSH_KEY      = one(local_sensitive_file.ssh_private_key[*].filename)
       ADMIN_USER   = var.admin_username
       RHEL_VERSION = each.value.rhel_version
       OUTPUT_DIR   = var.output_dir

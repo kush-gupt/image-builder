@@ -19,12 +19,13 @@ export AZCOPY_AUTO_LOGIN_TYPE=AZCLI 2>/dev/null || true
 export AZCOPY_CONCURRENCY_VALUE="${AZCOPY_CONCURRENCY_VALUE:-AUTO}"
 
 SAS=$(python3 -c "
+import os
 from datetime import datetime, timedelta, timezone
 from azure.storage.blob import generate_container_sas, ContainerSasPermissions
 sas = generate_container_sas(
-    account_name='${STORAGE_ACCOUNT_NAME}',
-    container_name='${CONTAINER_NAME}',
-    account_key='${STORAGE_ACCOUNT_KEY}',
+    account_name=os.environ['STORAGE_ACCOUNT_NAME'],
+    container_name=os.environ['CONTAINER_NAME'],
+    account_key=os.environ['STORAGE_ACCOUNT_KEY'],
     permission=ContainerSasPermissions(read=True, write=True, create=True),
     expiry=datetime.now(timezone.utc) + timedelta(hours=4),
 )

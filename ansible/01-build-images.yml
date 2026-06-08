@@ -159,7 +159,7 @@
         cmd: |
           set -eo pipefail
           {{ ssh10 }} "sudo chmod 755 /var/tmp/image-output && sudo chmod 644 /var/tmp/image-output/*.vhd"
-          VHD_NAME=$({{ ssh10 }} "ls /var/tmp/image-output/*.vhd" | tr -d '\r\n' | sed 's/.*\r//')
+          VHD_NAME=$({{ ssh10 }} "ls -t /var/tmp/image-output/*.vhd 2>/dev/null | head -n1" | tr -d '\r\n')
           {{ scp10 }} \
             builder@{{ rhel10_builder_ip }}:"$VHD_NAME" \
             {{ output_dir }}/rhel10-azure-stig-fips.vhd

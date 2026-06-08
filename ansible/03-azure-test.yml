@@ -95,7 +95,7 @@
         name: "{{ item.name }}"
       register: vm_check
       loop: "{{ test_vms }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: Set existing VM facts
       ansible.builtin.set_fact:
@@ -109,7 +109,7 @@
         state: absent
       loop: "{{ test_vms }}"
       when: "item.name not in existing_vms"
-      ignore_errors: true
+      failed_when: false
 
     # --- Deploy VMs in parallel ---
     - name: Deploy test VMs (async)

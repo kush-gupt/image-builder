@@ -24,6 +24,7 @@
     - name: "[RHEL 9] Clean old composes and VHDs"
       ansible.builtin.shell:
         cmd: |
+          set -o pipefail
           {{ ssh9 }} "sudo bash -c '
             for id in \$(composer-cli compose list 2>/dev/null | awk \"{print \\\$1}\"); do
               composer-cli compose delete \$id 2>/dev/null || true
@@ -113,6 +114,7 @@
     - name: "[RHEL 9] Wait for compose to finish (up to 60 minutes)"
       ansible.builtin.shell:
         cmd: |
+          set -o pipefail
           {{ ssh9 }} "sudo composer-cli compose status" | grep '{{ rhel9_compose_id }}' | awk '{print $2}'
         executable: /bin/bash
       register: rhel9_status

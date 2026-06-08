@@ -183,7 +183,7 @@
         api_version: "2022-03-03"
         state: absent
       loop: "{{ images }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: Wait for image version deletions to propagate
       ansible.builtin.pause:

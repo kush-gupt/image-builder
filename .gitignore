@@ -25,6 +25,15 @@ disks/
 builder_key*
 id_rsa_azure_test*
 
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/tfplan
+terraform/id_rsa_azure_test*
+
 # Editor / IDE state
 .cursor/
 .vscode/

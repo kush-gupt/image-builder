@@ -111,6 +111,27 @@
       when: "item.name not in existing_vms"
       failed_when: false
 
+    # --- Quick sanity check (Phase 2 already waited for replication) ---
+    - name: Confirm gallery images are ready
+      azure.azcollection.azure_rm_resource_info:
+        resource_group: "{{ azure_resourcegroup }}"
+        provider: Compute
+        resource_type: galleries
+        resource_name: "{{ gallery_name }}"
+        subresource:
+          - type: images
+            name: "{{ item.image }}"
+          - type: versions
+            name: "1.0.0"
+        api_version: "2022-03-03"
+      register: img_repl
+      until: >-
+        img_repl.response | default([]) | length > 0 and
+        img_repl.response[0].properties.provisioningState | default('') == 'Succeeded'
+      retries: 3
+      delay: 10
+      loop: "{{ test_vms }}"
+
     # --- Deploy VMs in parallel ---
     - name: Deploy test VMs (async)
       azure.azcollection.azure_rm_virtualmachine:
@@ -125,7 +146,10 @@
         network_interfaces:
           - "{{ item.name }}-nic"
         image:
-          id: "/subscriptions/{{ azure_subscription }}/resourceGroups/{{ azure_resourcegroup }}/providers/Microsoft.Compute/galleries/{{ gallery_name }}/images/{{ item.image }}/versions/1.0.0"
+          id: >-
+            /subscriptions/{{ azure_subscription }}/resourceGroups/{{
+            azure_resourcegroup }}/providers/Microsoft.Compute/galleries/{{
+            gallery_name }}/images/{{ item.image }}/versions/1.0.0
         os_type: Linux
         managed_disk_type: StandardSSD_LRS
         state: present

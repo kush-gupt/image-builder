@@ -18,3 +18,5 @@ rules:
 ignore:
   - output/
   - disks/
+  - terraform/
+  - ansible/.builder_ips.yml

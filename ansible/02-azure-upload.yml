@@ -208,7 +208,10 @@
               osDiskImage:
                 source:
                   uri: "https://{{ azure_storage_account }}.blob.core.windows.net/{{ azure_storage_container }}/{{ item.vhd }}"
-                  storageAccountId: "/subscriptions/{{ azure_subscription }}/resourceGroups/{{ azure_resourcegroup }}/providers/Microsoft.Storage/storageAccounts/{{ azure_storage_account }}"
+                  storageAccountId: >-
+                    /subscriptions/{{ azure_subscription }}/resourceGroups/{{
+                    azure_resourcegroup }}/providers/Microsoft.Storage/storageAccounts/{{
+                    azure_storage_account }}
         state: present
       loop: "{{ images }}"
       register: create_result
@@ -216,10 +219,39 @@
       retries: 6
       delay: 30
 
+    # azure_rm_resource returns on PUT acceptance; replication is async.
+    # Poll until provisioningState reaches a terminal state.
+    - name: Wait for image version provisioning to complete
+      azure.azcollection.azure_rm_resource_info:
+        resource_group: "{{ azure_resourcegroup }}"
+        provider: Compute
+        resource_type: galleries
+        resource_name: "{{ gallery_name }}"
+        subresource:
+          - type: images
+            name: "{{ item.name }}"
+          - type: versions
+            name: "1.0.0"
+        api_version: "2022-03-03"
+      register: imgver_status
+      until: >-
+        imgver_status.response | default([]) | length > 0 and
+        imgver_status.response[0].properties.provisioningState | default('') in ['Succeeded', 'Failed']
+      retries: 40
+      delay: 30
+      loop: "{{ images }}"
+
+    - name: Fail if any image version provisioning failed
+      ansible.builtin.fail:
+        msg: "Image version {{ item.item.name }}/1.0.0 provisioning failed"
+      when: >-
+        item.response[0].properties.provisioningState | default('') == 'Failed'
+      loop: "{{ imgver_status.results }}"
+
     - name: Display results
       ansible.builtin.debug:
         msg:
           - "Gallery: {{ gallery_name }}"
           - "RHEL 9 image: {{ gallery_name }}/rhel9-stig-fips/1.0.0"
           - "RHEL 10 image: {{ gallery_name }}/rhel10-stig-fips/1.0.0"
-          - "Next: ./run.sh 03-azure-test.yml"
+          - "Next: ./run.sh 03-azure-test.yml  (from project root)"

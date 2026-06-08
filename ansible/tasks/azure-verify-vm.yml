@@ -20,7 +20,8 @@
     cmd: >-
       ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i {{ ssh_key_file }}
       {{ azure_admin_user }}@{{ vm_ips[vm.name] }}
-      bash -c 'echo "=== LVM ===" && sudo lvs --noheadings 2>/dev/null && echo "=== Mounts ===" && df -hT / /home /tmp /var /var/log /var/log/audit /var/tmp 2>/dev/null'
+      bash -c 'echo "=== LVM ===" && sudo lvs --noheadings 2>/dev/null &&
+      echo "=== Mounts ===" && df -hT / /home /tmp /var /var/log /var/log/audit /var/tmp 2>/dev/null'
   register: lvm_check
   changed_when: false
 

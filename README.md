@@ -23,67 +23,58 @@ cp .env.example .env
 # Edit .env: ISO paths, RH subscription, Azure credentials
 
 # 2. Run the full pipeline (everything happens inside a container)
-source .env
-./ansible/run.sh site.yml
+./run.sh site.yml
 
 # Or run individual phases:
-./ansible/run.sh 00-create-build-vms.yml -e force_recreate=true
-./ansible/run.sh 01-build-images.yml
-./ansible/run.sh 02-azure-upload.yml
-./ansible/run.sh 03-azure-test.yml
+./run.sh 00-create-build-vms.yml -e force_recreate=true
+./run.sh 01-build-images.yml
+./run.sh 02-azure-upload.yml
+./run.sh 03-azure-test.yml
 ```
 
-`run.sh` builds and launches a Podman container with Ansible, Azure CLI, `azcopy`, and libvirt tools. The host only needs `podman`, `virsh`, and `setfacl`.
-
-## Repository Structure
-
-```
-.
-├── .env.example                     # Environment variables template
-├── ansible/
-│   ├── run.sh                       # Podman wrapper (entry point)
-│   ├── Containerfile                # Container image definition
-│   ├── ansible.cfg
-│   ├── site.yml                     # Full orchestrator
-│   ├── 00-create-build-vms.yml      # Provision FIPS+STIG builder VMs
-│   ├── 01-build-images.yml          # Build VHDs on builder VMs
-│   ├── 02-azure-upload.yml          # Upload VHDs, create Azure images
-│   ├── 03-azure-test.yml            # Deploy test VMs, verify compliance
-│   ├── vars.yml                     # Variables (reads from env)
-│   ├── inventory.yml
-│   ├── requirements.yml             # Galaxy collections
-│   └── tasks/
-│       └── azure-verify-vm.yml      # FIPS/LVM/STIG checks per VM
-├── blueprints/
-│   ├── rhel9-azure-stig-fips.toml   # RHEL 9 Image Builder blueprint
-│   └── rhel10-azure-stig-fips.toml  # RHEL 10 Image Builder blueprint
-├── kickstarts/
-│   ├── rhel9-builder.ks.j2          # Builder VM kickstart Template
-│   └── rhel10-builder.ks.j2
-├── FIPS-STIG-NOTES.md               # Implementation details
-└── output/                          # Built VHDs and reports
-```
+`run.sh` builds and launches a Podman container with Ansible, Terraform, Azure CLI, `azcopy`, and libvirt tools. The host only needs `podman`, `virsh`, and `setfacl`.
 
 ## Pipeline Phases
 
-### Phase 0: Builder VMs
 
-Provisions two libvirt/KVM VMs from DVD ISOs with unattended kickstart. Both VMs boot in FIPS mode and apply STIG remediation during install. SSH access uses an ECDSA-384 keypair generated at runtime.
+| Phase                  | What                                       | Typical Time |
+| ---------------------- | ------------------------------------------ | ------------ |
+| 0                      | Provision builder VMs from DVD ISOs        | ~5 min       |
+| 1                      | Build VHD images (parallel on both VMs)    | ~11 min      |
+| 2                      | Upload VHDs + create Azure Compute Gallery | ~4 min       |
+| 3                      | Deploy test VMs + FIPS/LVM/STIG scans      | ~7 min       |
+| **Total (end-to-end)** |                                            | **~27 min**  |
 
-- RHEL 9 runs `osbuild-composer` + `composer-cli`
-- RHEL 10 runs the standalone `image-builder` CLI
 
-### Phase 1: Image Build
+### Phases 0-1: Build VHDs
 
-Pushes TOML blueprints to Image Builder on each VM. Both builds run in parallel. Output is a pair of Azure-compatible `.vhd` files with STIG packages, FIPS kernel args, and LVM layout pre-configured.
+You need some FIPS-enabled RHEL machine running Red Hat Image Builder. A RHEL 10 builder can produce both RHEL 9 and RHEL 10 images; RHEL 9 can only build up to RHEL 9 and below. The builder pushes TOML blueprints and outputs Azure-compatible `.vhd` files with STIG packages, FIPS kernel args, and LVM layout baked in.
 
-### Phase 2: Azure Upload
+We include Ansible playbooks that automate this from scratch: provision libvirt/KVM VMs from DVD ISOs (`00-create-build-vms.yml`), then run the builds (`01-build-images.yml`). If you already have a FIPS RHEL box with Image Builder, skip straight to the blueprints in `blueprints/`.
 
-Uploads VHDs as page blobs via `azcopy` (parallel, SAS-token authenticated), then publishes them to an Azure Compute Gallery as Gen 2 image versions.
+### Phases 2-3: Upload and Verify
 
-### Phase 3: Verification
+Two options for uploading VHDs to Azure and deploying test VMs:
 
-Deploys test VMs from the custom images and checks:
+**Ansible** (~11 min):
+
+```bash
+./run.sh 02-azure-upload.yml    # ~4 min
+./run.sh 03-azure-test.yml      # ~7 min
+```
+
+**Terraform** (~11 min):
+
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform.tfvars (see terraform/README.md)
+./run.sh terraform init
+./run.sh terraform apply
+```
+
+Both paths do the same thing: upload VHDs as page blobs, publish them to an Azure Compute Gallery as Gen 2 image versions, then (optionally) deploy test VMs and run FIPS/LVM/OpenSCAP STIG scans. See `terraform/README.md` for full details.
+
+Phase 3 checks:
 
 - `/proc/sys/crypto/fips_enabled == 1`
 - LVM volumes with STIG-required mount points
@@ -127,7 +118,7 @@ Optional: `BUILD_VM_RAM` (default 4096), `BUILD_VM_VCPUS` (default 2), `BUILD_VM
 
 ## BYOS
 
-These images carry no marketplace billing. Register post-deploy:
+These images should carry no marketplace billing. Register post-deploy:
 
 ```bash
 sudo subscription-manager register --org=<ORG_ID> --activationkey=<KEY>
@@ -138,6 +129,43 @@ sudo subscription-manager register --org=<ORG_ID> --activationkey=<KEY>
 **Azure VM won't boot**: Images are published to an Azure Compute Gallery with `--feature DiskControllerTypes=SCSI,NVMe`, which enables deployment on both SCSI and NVMe VM sizes (including Dsv6). Confirm the gallery image version exists and the VM size supports Gen 2.
 
 **STIG scan shows failures**: Some rules require site-specific config (banner text, NTP servers, audit forwarding). See `FIPS-STIG-NOTES.md` for the full list.
+
+## Repository Structure
+
+```
+.
+├── .env.example                     # Environment variables template
+├── run.sh                               # Podman wrapper (entry point)
+├── ansible/
+│   ├── Containerfile                # Container image definition
+│   ├── ansible.cfg
+│   ├── site.yml                     # Full orchestrator
+│   ├── 00-create-build-vms.yml      # Provision FIPS+STIG builder VMs
+│   ├── 01-build-images.yml          # Build VHDs on builder VMs
+│   ├── 02-azure-upload.yml          # Upload VHDs, create Azure images
+│   ├── 03-azure-test.yml            # Deploy test VMs, verify compliance
+│   ├── vars.yml                     # Variables (reads from env)
+│   ├── inventory.yml
+│   ├── requirements.yml             # Galaxy collections
+│   └── tasks/
+│       └── azure-verify-vm.yml      # FIPS/LVM/STIG checks per VM
+├── terraform/                       # Alternative for phases 2-3
+│   ├── README.md
+│   ├── versions.tf, provider.tf
+│   ├── variables.tf, locals.tf
+│   ├── storage.tf, gallery.tf
+│   ├── network.tf, test-vms.tf
+│   ├── outputs.tf
+│   └── scripts/
+├── blueprints/
+│   ├── rhel9-azure-stig-fips.toml   # RHEL 9 Image Builder blueprint
+│   └── rhel10-azure-stig-fips.toml  # RHEL 10 Image Builder blueprint
+├── kickstarts/
+│   ├── rhel9-builder.ks.j2          # Builder VM kickstart template
+│   └── rhel10-builder.ks.j2
+├── FIPS-STIG-NOTES.md               # Implementation details
+└── output/                          # Built VHDs and reports
+```
 
 ## References
 

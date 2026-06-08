@@ -1,0 +1,23 @@
+# cp terraform.tfvars.example terraform.tfvars
+#
+# Auth is via env vars (see README.md):
+#   export ARM_CLIENT_ID="..."
+#   export ARM_CLIENT_SECRET="..."
+#   export ARM_TENANT_ID="..."
+#   export ARM_SUBSCRIPTION_ID="..."
+
+subscription_id    = ""              # Azure subscription ID
+resource_group_name = ""             # Must already exist
+
+# location             = "eastus"
+# storage_account_name = ""          # Auto-derived from resource group if empty
+# storage_container_name = "vhds"
+# gallery_name         = "stig_images"
+# image_version        = "1.0.0"
+
+# vhd_dir = "../output"              # Where Phase 1 (Ansible) wrote VHDs
+
+# deploy_test_vms = true             # Set to false to skip Phase 3
+# vm_size         = "Standard_D2s_v6"
+# admin_username  = "azureuser"
+# output_dir      = "../output"      # Where STIG reports are downloaded

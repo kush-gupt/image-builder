@@ -6,8 +6,60 @@ Red Hat Image Builder blueprint files (TOML). Each one defines a full OS image: 
 | Blueprint                    | Builder tool                      | FIPS standard | STIG datastream     |
 | ---------------------------- | --------------------------------- | ------------- | ------------------- |
 | `rhel9-azure-stig-fips.toml` | `composer-cli` (osbuild-composer) | 140-3         | `ssg-rhel9-ds.xml`  |
-| `rhel10-azure-stig-fips.toml` | `image-builder` CLI              | 140-3         | `ssg-rhel10-ds.xml` |
+| `rhel10-stig-fips.toml`      | `image-builder` CLI               | 140-3         | `ssg-rhel10-ds.xml` |
 
+
+## Building VHDs
+
+The build tools differ between RHEL 9 and RHEL 10. Each blueprint must be built on a host running the matching RHEL version with Image Builder installed.
+
+### RHEL 9 (`composer-cli` / osbuild-composer)
+
+Your builder user must be in the `weldr` group to use `composer-cli` without sudo:
+
+```bash
+sudo usermod -a -G weldr $USER
+```
+
+```bash
+# Push the blueprint into the local osbuild-composer store
+composer-cli blueprints push rhel9-azure-stig-fips.toml
+
+# Verify all package dependencies resolve
+composer-cli blueprints depsolve rhel9-azure-stig-fips
+
+# Start the VHD compose (runs in the background)
+composer-cli compose start rhel9-azure-stig-fips vhd
+
+# Check status (the UUID is printed by the start command)
+composer-cli compose status
+
+# Once FINISHED, download the VHD
+composer-cli compose image <UUID>
+# Output: <UUID>-disk.vhd
+```
+
+### RHEL 10 (`image-builder` CLI)
+
+```bash
+# Build directly from the blueprint file (requires root for loopback/mount)
+sudo image-builder build vhd \
+  --blueprint rhel10-stig-fips.toml \
+  --output-dir /var/tmp/image-output \
+  2>&1 | tee /var/tmp/image-builder.log
+
+# Output: /var/tmp/image-output/*.vhd
+```
+
+### Automated builds
+
+The Ansible playbook `ansible/01-build-images.yml` automates both builds in parallel on the dedicated builder VMs. From the project root:
+
+```bash
+./run.sh 01-build-images.yml
+```
+
+This copies each blueprint to its respective builder VM, runs the build, and fetches the resulting VHDs to `output/`.
 
 ## Packages
 
@@ -37,23 +89,27 @@ Every package in the `[[packages]]` list exists because some STIG control requir
 
 `partitioning_mode` and `[[customizations.filesystem]]` work on any image type that produces a partitioned disk. The unsupported types:
 
-| Image type | Why |
-|-----------|-----|
-| `container` | No disk, just a rootfs tarball |
-| `tar` | Same, no partition table |
-| `image-installer` | ISO extracts a pre-installed tar via Kickstart `liveimg`. Filesystem customizations silently fail or cause Kickstart errors. |
-| `edge-commit`, `edge-container` | OSTree commits with no disk image |
-| `edge-installer`, `edge-simplified-installer` | OSTree install media, partition layout is fixed |
+
+| Image type                                    | Why                                                                                                                          |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `container`                                   | No disk, just a rootfs tarball                                                                                               |
+| `tar`                                         | Same, no partition table                                                                                                     |
+| `image-installer`                             | ISO extracts a pre-installed tar via Kickstart `liveimg`. Filesystem customizations silently fail or cause Kickstart errors. |
+| `edge-commit`, `edge-container`               | OSTree commits with no disk image                                                                                            |
+| `edge-installer`, `edge-simplified-installer` | OSTree install media, partition layout is fixed                                                                              |
+
 
 Supported types: `ami`, `gce`, `vhd`, `qcow2`, `oci`, `vmdk`, `ova`, `vagrant-libvirt`, `wsl`, `edge-raw-image`, `edge-ami`, `edge-vsphere`.
 
 Three modes are available:
 
-| Mode | Behavior |
-|------|----------|
+
+| Mode       | Behavior                                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `auto-lvm` | Raw partitions unless filesystem customizations exist, then LVM. Default when `[[customizations.filesystem]]` is present. |
-| `lvm` | Always LVM, even with no extra mount points. Used by these blueprints. |
-| `raw` | Raw partitions even with multiple mount points. |
+| `lvm`      | Always LVM, even with no extra mount points. Used by these blueprints.                                                    |
+| `raw`      | Raw partitions even with multiple mount points.                                                                           |
+
 
 ### FIPS and STIG profile
 

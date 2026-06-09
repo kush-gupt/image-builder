@@ -70,7 +70,7 @@ resource "azurerm_linux_virtual_machine" "test" {
     public_key = one(tls_private_key.test[*].public_key_openssh)
   }
 
-  source_image_id = azapi_resource.image_versions[each.value.image_key].id
+  source_image_id = azurerm_shared_image_version.images[each.value.image_key].id
 
   os_disk {
     caching              = "ReadWrite"

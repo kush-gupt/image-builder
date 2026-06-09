@@ -22,6 +22,10 @@ terraform {
       source  = "azure/azapi"
       version = ">= 2.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
   }
 
   # Uncomment and configure for shared remote state:

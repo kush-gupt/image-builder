@@ -1,10 +1,18 @@
+resource "random_string" "storage_suffix" {
+  length  = 6
+  lower   = true
+  upper   = false
+  numeric = true
+  special = false
+}
+
 locals {
-  # Auto-derive storage account name from resource group if not provided.
-  # Mirrors Ansible: 'stigimages' + sanitized resource group name, max 24 chars.
+  # Auto-derive storage account name with a random suffix to avoid Azure DNS
+  # cache issues when a storage account is deleted and recreated.
   storage_account_name = (
     var.storage_account_name != ""
     ? var.storage_account_name
-    : substr("stigimages${regexreplace(lower(var.resource_group_name), "[^a-z0-9]", "")}", 0, 24)
+    : substr("stig${replace(lower(var.resource_group_name), "/[^a-z0-9]/", "")}${random_string.storage_suffix.result}", 0, 24)
   )
 
   images = {

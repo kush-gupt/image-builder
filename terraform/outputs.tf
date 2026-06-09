@@ -14,7 +14,7 @@ output "gallery_id" {
 
 output "image_version_ids" {
   description = "Resource IDs of published gallery image versions."
-  value       = { for k, v in azapi_resource.image_versions : k => v.id }
+  value       = { for k, v in azurerm_shared_image_version.images : k => v.id }
 }
 
 # --- Test VMs (only populated when deploy_test_vms = true) ---

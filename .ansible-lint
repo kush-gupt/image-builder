@@ -5,6 +5,7 @@ exclude_paths:
   - output/
   - disks/
   - .github/
+  - terraform/
 
 skip_list:
   # Shell/command tasks that perform builds and provisioning are inherently

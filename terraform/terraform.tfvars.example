@@ -1,0 +1,20 @@
+# cp terraform.tfvars.example terraform.tfvars
+#
+# Auth + identity are set via env vars (see README.md):
+#   export ARM_CLIENT_ID="..."
+#   export ARM_CLIENT_SECRET="..."
+#   export ARM_TENANT_ID="..."
+#   export ARM_SUBSCRIPTION_ID="..."
+#   export TF_VAR_resource_group_name="..."
+#
+# All other variables have sensible defaults. Override only as needed:
+
+# location               = "eastus"
+# storage_container_name = "vhds"
+# gallery_name           = "stig_images"
+# image_version          = "1.0.0"
+# vhd_dir                = "../output"
+# deploy_test_vms        = true
+# vm_size                = "Standard_D2s_v6"
+# admin_username         = "azureuser"
+# output_dir             = "../output"

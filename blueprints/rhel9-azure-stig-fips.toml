@@ -1,5 +1,5 @@
 name = "rhel9-azure-stig-fips"
-description = "RHEL 9 Azure VHD with DISA STIG, FIPS 140-2, LVM partitioning (BYOS/Gen2)"
+description = "RHEL 9 Azure VHD with DISA STIG, FIPS 140-3, LVM partitioning (BYOS/Gen2)"
 version = "1.2.0"
 distro = "rhel-9"
 

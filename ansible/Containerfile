@@ -4,11 +4,16 @@ USER root
 
 RUN rpm --import https://packages.microsoft.com/keys/microsoft.asc \
     && dnf install -y https://packages.microsoft.com/config/fedora/42/packages-microsoft-prod.rpm \
+    && rpm --import https://rpm.releases.hashicorp.com/gpg \
+    && curl -fsSL https://rpm.releases.hashicorp.com/fedora/hashicorp.repo \
+        -o /etc/yum.repos.d/hashicorp.repo \
     && dnf install -y \
         azure-cli \
         libvirt-client \
         virt-install \
+        cpio \
         acl \
+        terraform \
     && dnf clean all \
     && curl -sL 'https://aka.ms/downloadazcopy-v10-linux' | tar xz --strip-components=1 -C /usr/local/bin/ --wildcards '*/azcopy'
 

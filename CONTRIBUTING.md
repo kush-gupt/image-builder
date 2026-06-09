@@ -30,9 +30,9 @@ pre-commit install
 4. Run the full pipeline or individual phases:
 
 ```bash
-source .env
-./ansible/run.sh site.yml          # full pipeline
-./ansible/run.sh 01-build-images.yml   # single phase
+./run.sh site.yml                      # full Ansible pipeline
+./run.sh 01-build-images.yml           # single Ansible phase
+./run.sh terraform apply               # Terraform phases 2-3
 ```
 
 5. Make your changes on a feature branch.

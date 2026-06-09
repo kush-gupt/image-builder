@@ -16,7 +16,10 @@ azure_tenant: "{{ lookup('env', 'AZURE_TENANT') }}"
 azure_subscription: "{{ lookup('env', 'AZURE_SUBSCRIPTION') }}"
 azure_resourcegroup: "{{ lookup('env', 'AZURE_RESOURCEGROUP') }}"
 azure_location: "{{ lookup('env', 'AZURE_LOCATION') | default('eastus', true) }}"
-azure_storage_account: "{{ lookup('env', 'AZURE_STORAGE_ACCOUNT') | default('stigimages' + azure_resourcegroup | regex_replace('[^a-z0-9]', '') | truncate(16, True, ''), true) }}"
+azure_storage_account: >-
+  {{ lookup('env', 'AZURE_STORAGE_ACCOUNT') |
+     default('stigimages' + azure_resourcegroup |
+     regex_replace('[^a-z0-9]', '') | truncate(16, True, ''), true) }}
 azure_storage_container: "{{ lookup('env', 'AZURE_STORAGE_CONTAINER') | default('vhds', true) }}"
 
 # --- Builder VM credentials ---
@@ -37,3 +40,4 @@ project_dir: "{{ playbook_dir }}/.."
 blueprints_dir: "{{ project_dir }}/blueprints"
 kickstarts_dir: "{{ project_dir }}/kickstarts"
 output_dir: "{{ project_dir }}/output"
+libvirt_images_dir: "{{ lookup('env', 'LIBVIRT_IMAGES_DIR') | default('/var/lib/libvirt/images', true) }}"

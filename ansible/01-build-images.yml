@@ -20,16 +20,23 @@
     scp10: "scp {{ ssh_opts }} -i {{ builder_ssh_key }}"
 
   tasks:
+    # --- One-time setup: ensure builder can use composer-cli without sudo ---
+    - name: "[RHEL 9] Ensure builder user is in weldr group"
+      ansible.builtin.command:
+        cmd: "{{ ssh9 }} sudo usermod -a -G weldr builder"
+      changed_when: true
+      failed_when: false
+
     # --- Clean old artifacts to prevent disk-full failures ---
     - name: "[RHEL 9] Clean old composes and VHDs"
       ansible.builtin.shell:
         cmd: |
           set -o pipefail
-          {{ ssh9 }} "sudo bash -c '
+          {{ ssh9 }} "bash -c '
             for id in \$(composer-cli compose list 2>/dev/null | awk \"{print \\\$1}\"); do
               composer-cli compose delete \$id 2>/dev/null || true
             done
-            rm -f /var/tmp/*-disk.vhd
+            rm -f ~/*-disk.vhd
           '"
         executable: /bin/bash
       changed_when: true
@@ -44,35 +51,23 @@
       failed_when: false
 
     # --- Setup RHEL 9 builder and start compose ---
-    - name: "[RHEL 9] Ensure subscription is active"
-      ansible.builtin.command:
-        cmd: "{{ ssh9 }} sudo subscription-manager status"
-      changed_when: false
-      failed_when: false
-
-    - name: "[RHEL 9] Enable osbuild-composer socket"
-      ansible.builtin.command:
-        cmd: "{{ ssh9 }} sudo systemctl enable --now osbuild-composer.socket"
-      changed_when: true
-
     - name: "[RHEL 9] Copy blueprint to builder"
       ansible.builtin.command:
         cmd: >-
           {{ scp9 }}
           {{ blueprints_dir }}/rhel9-azure-stig-fips.toml
-          builder@{{ rhel9_builder_ip }}:/tmp/rhel9-azure-stig-fips.toml
+          builder@{{ rhel9_builder_ip }}:~/rhel9-azure-stig-fips.toml
       changed_when: true
 
     - name: "[RHEL 9] Push blueprint and start compose"
       ansible.builtin.shell:
         cmd: |
           set -eo pipefail
-          {{ ssh9 }} "sudo bash -c '
-            cp /tmp/rhel9-azure-stig-fips.toml /root/ &&
-            composer-cli blueprints push /root/rhel9-azure-stig-fips.toml &&
+          {{ ssh9 }} "
+            composer-cli blueprints push ~/rhel9-azure-stig-fips.toml &&
             composer-cli blueprints depsolve rhel9-azure-stig-fips &&
             composer-cli compose start rhel9-azure-stig-fips vhd
-          '"
+          "
         executable: /bin/bash
       register: rhel9_compose_out
       changed_when: true
@@ -91,20 +86,18 @@
         cmd: >-
           {{ scp10 }}
           {{ blueprints_dir }}/rhel10-stig-fips.toml
-          builder@{{ rhel10_builder_ip }}:/tmp/rhel10-stig-fips.toml
+          builder@{{ rhel10_builder_ip }}:~/rhel10-stig-fips.toml
       changed_when: true
 
+    # image-builder build needs root: it uses loopback devices and mount
+    # which aren't namespace-able in the kernel.
     - name: "[RHEL 10] Start image-builder build (async)"
       ansible.builtin.shell:
         cmd: |
-          {{ ssh10 }} "sudo bash -c '
-            rm -rf /var/tmp/image-output &&
-            cp /tmp/rhel10-stig-fips.toml /root/ &&
-            image-builder build vhd \
-              --blueprint /root/rhel10-stig-fips.toml \
-              --output-dir /var/tmp/image-output \
-              --ignore-warnings
-          '"
+          {{ ssh10 }} "sudo image-builder build vhd \
+            --blueprint ~/rhel10-stig-fips.toml \
+            --output-dir /var/tmp/image-output \
+            --ignore-warnings"
         executable: /bin/bash
       async: 3600
       poll: 0
@@ -115,7 +108,7 @@
       ansible.builtin.shell:
         cmd: |
           set -o pipefail
-          {{ ssh9 }} "sudo composer-cli compose status" | grep '{{ rhel9_compose_id }}' | awk '{print $2}'
+          {{ ssh9 }} "composer-cli compose status" | grep '{{ rhel9_compose_id }}' | awk '{print $2}'
         executable: /bin/bash
       register: rhel9_status
       until: rhel9_status.stdout | trim in ['FINISHED', 'FAILED']
@@ -148,35 +141,48 @@
         state: directory
         mode: "0755"
 
-    - name: "[RHEL 9] Fetch VHD from builder"
+    - name: "[RHEL 9] Fetch VHD from builder (async)"
       ansible.builtin.shell:
         cmd: |
           set -eo pipefail
-          {{ ssh9 }} "sudo bash -c '
-            cd /var/tmp &&
-            composer-cli compose image {{ rhel9_compose_id }} || true
-            chmod 644 /var/tmp/{{ rhel9_compose_id }}-disk.vhd
-          '"
+          {{ ssh9 }} "cd ~ && rm -f {{ rhel9_compose_id }}-disk.vhd && composer-cli compose image {{ rhel9_compose_id }}"
           {{ scp9 }} \
-            builder@{{ rhel9_builder_ip }}:/var/tmp/{{ rhel9_compose_id }}-disk.vhd \
+            builder@{{ rhel9_builder_ip }}:~/{{ rhel9_compose_id }}-disk.vhd \
             {{ output_dir }}/rhel9-azure-stig-fips.vhd
         executable: /bin/bash
-      register: rhel9_fetch
+      async: 1800
+      poll: 0
+      register: rhel9_fetch_async
 
-    - name: "[RHEL 10] Fetch VHD from builder"
+    - name: "[RHEL 10] Fetch VHD from builder (async)"
       ansible.builtin.shell:
         cmd: |
           set -eo pipefail
-          {{ ssh10 }} "sudo bash -c '
-            chmod 755 /var/tmp/image-output &&
-            chmod 644 /var/tmp/image-output/*.vhd
-          '"
-          VHD_NAME=$({{ ssh10 }} "ls /var/tmp/image-output/*.vhd" | tr -d '\r\n' | sed 's/.*\r//')
+          {{ ssh10 }} "sudo chmod 755 /var/tmp/image-output && sudo chmod 644 /var/tmp/image-output/*.vhd"
+          VHD_NAME=$({{ ssh10 }} "ls -t /var/tmp/image-output/*.vhd 2>/dev/null | head -n1" | tr -d '\r\n')
           {{ scp10 }} \
             builder@{{ rhel10_builder_ip }}:"$VHD_NAME" \
             {{ output_dir }}/rhel10-azure-stig-fips.vhd
         executable: /bin/bash
+      async: 1800
+      poll: 0
+      register: rhel10_fetch_async
+
+    - name: "[RHEL 9] Wait for VHD fetch"
+      ansible.builtin.async_status:
+        jid: "{{ rhel9_fetch_async.ansible_job_id }}"
+      register: rhel9_fetch
+      until: rhel9_fetch.finished
+      retries: 60
+      delay: 30
+
+    - name: "[RHEL 10] Wait for VHD fetch"
+      ansible.builtin.async_status:
+        jid: "{{ rhel10_fetch_async.ansible_job_id }}"
       register: rhel10_fetch
+      until: rhel10_fetch.finished
+      retries: 60
+      delay: 30
 
     - name: Display results
       ansible.builtin.debug:
@@ -185,4 +191,4 @@
             RHEL 9:  {{ output_dir }}/rhel9-azure-stig-fips.vhd
             RHEL 10: {{ output_dir }}/rhel10-azure-stig-fips.vhd
 
-          Next: ./run.sh 02-azure-upload.yml
+          Next: ./run.sh 02-azure-upload.yml  (or: ./run.sh terraform apply)

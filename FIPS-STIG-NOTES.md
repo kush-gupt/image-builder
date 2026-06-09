@@ -94,7 +94,7 @@ Azure serial console operates via the hypervisor's virtual COM port, transparent
 | ---------------- | --------------------------------------- | --------------------------------------------------------------- |
 | Image Builder    | `osbuild-composer` + `composer-cli`     | `image-builder` CLI (standalone)                                |
 | Daemon           | `osbuild-composer.socket`               | None (runs directly)                                            |
-| FIPS standard    | 140-2                                   | 140-3                                                           |
+| FIPS standard    | 140-3                                   | 140-3                                                           |
 | STIG datastream  | `ssg-rhel9-ds.xml`                      | `ssg-rhel10-ds.xml`                                             |
 | Build invocation | `composer-cli compose start <name> vhd` | `image-builder build vhd --blueprint <file> --output-dir <dir>` |
 | Output location  | `/var/lib/osbuild-composer/artifacts/`  | Specified via `--output-dir`                                    |

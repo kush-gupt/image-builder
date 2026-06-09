@@ -28,14 +28,11 @@
       ansible.builtin.command: virsh uri
       changed_when: false
 
-    - name: Create output and disk directories
+    - name: Create output directory
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ output_dir }}"
         state: directory
         mode: "0755"
-      loop:
-        - "{{ output_dir }}"
-        - "{{ project_dir }}/disks"
 
     # --- Force destroy existing VMs if force_recreate=true ---
     - name: Destroy existing VMs (force recreate)
@@ -50,7 +47,7 @@
 
     - name: Clean up stale disk images (force recreate)
       ansible.builtin.file:
-        path: "{{ project_dir }}/disks/{{ item }}.qcow2"
+        path: "{{ libvirt_images_dir }}/{{ item }}.qcow2"
         state: absent
       loop:
         - rhel9-builder
@@ -130,7 +127,7 @@
         --memory {{ build_vm_ram_mb }}
         --vcpus {{ build_vm_vcpus }}
         --os-variant rhel9-unknown
-        --disk path={{ project_dir }}/disks/rhel9-builder.qcow2,size={{ build_vm_disk_gb }},format=qcow2,bus=virtio
+        --disk path={{ libvirt_images_dir }}/rhel9-builder.qcow2,size={{ build_vm_disk_gb }},format=qcow2,bus=virtio
         --network network={{ libvirt_network }},model=virtio
         --location {{ rhel9_iso }}
         --initrd-inject=/tmp/rhel9-builder-ks.cfg
@@ -152,7 +149,7 @@
         --memory {{ build_vm_ram_mb }}
         --vcpus {{ build_vm_vcpus }}
         --os-variant rhel9-unknown
-        --disk path={{ project_dir }}/disks/rhel10-builder.qcow2,size={{ build_vm_disk_gb }},format=qcow2,bus=virtio
+        --disk path={{ libvirt_images_dir }}/rhel10-builder.qcow2,size={{ build_vm_disk_gb }},format=qcow2,bus=virtio
         --network network={{ libvirt_network }},model=virtio
         --location {{ rhel10_iso }}
         --initrd-inject=/tmp/rhel10-builder-ks.cfg
@@ -243,4 +240,4 @@
             RHEL 9  : {{ rhel9_ip_result.stdout | default('pending') | trim }}
             RHEL 10 : {{ rhel10_ip_result.stdout | default('pending') | trim }}
 
-          Next: ./run.sh 01-build-images.yml
+          Next: ./run.sh 01-build-images.yml  (from project root)

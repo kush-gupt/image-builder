@@ -32,7 +32,7 @@ network --bootproto=dhcp --device=link --activate --onboot=yes
 # key-only auth in %post (PasswordAuthentication no), and the VMs have no
 # inbound network access beyond the libvirt host.
 rootpw --plaintext {{ builder_password }}
-user --name=builder --password={{ builder_password }} --plaintext --groups=wheel
+user --name=builder --password={{ builder_password }} --plaintext --groups=wheel,weldr
 
 # --- Security ---
 selinux --enforcing
